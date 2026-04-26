@@ -15,6 +15,10 @@ Scraping the full archive naïvely (day-by-day) would require **~27,000 page loa
 
 ---
 
+## Demo and Result
+
+[Demo and Result](https://www.sci.gov.in/judgements-judgement-date/)
+
 ## Our Approach & Techniques
 
 ### 1. Reverse-Engineering the API
