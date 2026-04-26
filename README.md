@@ -17,7 +17,7 @@ Scraping the full archive naïvely (day-by-day) would require **~27,000 page loa
 
 ## Demo and Result
 
-[Demo and Result](https://www.sci.gov.in/judgements-judgement-date/)
+[Demo and Result](https://www.sci.gov.in/judgements-judgement-date/](https://htmlpreview.github.io/?https://raw.githubusercontent.com/porasnagar/sci-scraper-/main/results.html))
 
 ## Our Approach & Techniques
 
