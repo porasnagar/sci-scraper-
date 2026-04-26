@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environments
+.env
+.venv
+env/
+venv/
+.conda/
+
+# Scraped data (large – don't commit)
+sci_judgements/
+
+# Debug / temp
+*.png
+diagnose_headless.py
+sci_scraper_v1.py
+sci_scraper_v2.py
+sci_scraper_v3.py
+test_ocr.py
+headless_source.html
