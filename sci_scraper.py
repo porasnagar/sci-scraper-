@@ -467,6 +467,7 @@ def parse_html_table(html, from_date, to_date):
                 if all(len(t) < 3 for t in texts):
                     continue
 
+                # Extract PDF / document viewer link
                 pdf_url = ""
                 all_links = []
                 for a in row.find_all("a", href=True):
@@ -474,8 +475,12 @@ def parse_html_table(html, from_date, to_date):
                     if not href.startswith("http"):
                         href = "https://www.sci.gov.in" + href
                     all_links.append(href)
-                    if ".pdf" in href.lower() or "api.sci.gov.in" in href:
+                    # Prefer direct PDF or the api.sci.gov.in document handle
+                    if ".pdf" in href.lower():
                         pdf_url = href
+                        break
+                    if "api.sci.gov.in" in href and "/handle/" in href:
+                        pdf_url = href  # keep looking for a .pdf but accept this
                 if not pdf_url and all_links:
                     pdf_url = all_links[0]
 
@@ -483,7 +488,7 @@ def parse_html_table(html, from_date, to_date):
                     "from_date":  str(from_date),
                     "to_date":    str(to_date),
                     "pdf_url":    pdf_url,
-                    "filename":   pdf_url.split("/")[-1].split("?")[0] if pdf_url else "",
+                    "filename":   pdf_url.rstrip("/").split("/")[-1].split("?")[0] if pdf_url else "",
                     "raw_cells":  texts,
                 }
 
@@ -519,6 +524,56 @@ def parse_html_table(html, from_date, to_date):
 
 
 # =============================================================================
+#  PDF DOWNLOADER  (optional, --download-pdfs flag)
+# =============================================================================
+
+def download_pdf(record, page, pdf_dir):
+    """
+    Download the PDF for a single record.
+    Saves to pdf_dir/<case_no>_<date>.pdf
+    Returns the local path string, or '' on failure.
+    """
+    url = record.get("pdf_url", "")
+    if not url or url in ("https://www.sci.gov.in", "https://api.sci.gov.in/"):
+        return ""
+
+    # Build a safe filename
+    case_no = re.sub(r"[^\w\-]", "_", record.get("case_no", "unknown"))
+    jdate   = re.sub(r"[^\d\-]", "", record.get("judgment_date", "")[:10])
+    fname   = "%s_%s.pdf" % (case_no, jdate) if jdate else "%s.pdf" % case_no
+    dest    = pdf_dir / fname
+
+    if dest.exists():
+        return str(dest)  # already downloaded
+
+    try:
+        # Use Playwright's request context to inherit session cookies
+        resp = page.request.get(url, timeout=30_000)
+        if resp.ok:
+            content_type = resp.headers.get("content-type", "")
+            if "pdf" in content_type or url.endswith(".pdf"):
+                dest.write_bytes(resp.body())
+                log.debug("  PDF saved: %s", dest.name)
+                return str(dest)
+            else:
+                # Try to find a direct .pdf link in the response (document viewer redirect)
+                body_text = resp.text()
+                m = re.search(r'(https?://[^"\s]+\.pdf)', body_text)
+                if m:
+                    pdf_resp = page.request.get(m.group(1), timeout=30_000)
+                    if pdf_resp.ok:
+                        dest.write_bytes(pdf_resp.body())
+                        log.debug("  PDF saved (resolved): %s", dest.name)
+                        return str(dest)
+        else:
+            log.debug("  PDF fetch failed: HTTP %s for %s", resp.status, url)
+    except Exception as e:
+        log.debug("  PDF download error: %s", e)
+
+    return ""
+
+
+# =============================================================================
 #  DATE WINDOW GENERATOR
 # =============================================================================
 
@@ -534,7 +589,7 @@ def date_windows(start, end, window_days=30):
 #  ORCHESTRATOR
 # =============================================================================
 
-def run_scraper(start_year=1950, end_year=None, mode="demo", headed=True):
+def run_scraper(start_year=1950, end_year=None, mode="demo", headed=True, download_pdfs=False):
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -595,6 +650,11 @@ def run_scraper(start_year=1950, end_year=None, mode="demo", headed=True):
         except ImportError:
             log.debug("playwright-stealth not available; using headed mode is recommended")
 
+        pdf_dir = OUTPUT_DIR / "pdfs"
+        if download_pdfs:
+            pdf_dir.mkdir(exist_ok=True)
+            log.info("PDF download mode ON  ->  %s", pdf_dir)
+
         for i, (fd, td) in enumerate(windows, 1):
             log.info("  [%4d/%d]  %s -> %s", i, total, fd, td)
             try:
@@ -602,6 +662,14 @@ def run_scraper(start_year=1950, end_year=None, mode="demo", headed=True):
             except Exception as e:
                 log.warning("  Unexpected error: %s", e)
                 records = []
+
+            # Optional PDF download
+            if download_pdfs and records:
+                log.info("           Downloading %d PDFs...", len(records))
+                for r in records:
+                    local = download_pdf(r, page, pdf_dir)
+                    if local:
+                        r["local_pdf"] = local
 
             all_records.extend(records)
 
@@ -639,6 +707,8 @@ def main():
     ap.add_argument("--end",    type=int, default=date.today().year)
     ap.add_argument("--headless", action="store_true",
                     help="Run headless (WARNING: site may block headless; headed is recommended)")
+    ap.add_argument("--download-pdfs", action="store_true",
+                    help="Download actual PDF files to sci_judgements/pdfs/ (slow, large disk usage)")
     ap.add_argument("--debug",  action="store_true", help="Verbose logging")
     args = ap.parse_args()
 
@@ -653,14 +723,21 @@ def main():
     if args.mode == "full":
         total_days = (date(args.end, 12, 31) - date(args.start, 1, 1)).days
         n = total_days // 30 + 1
-        print("\nEstimate %d-%d: %d windows, ~%.1f hrs" % (args.start, args.end, n, n*7/3600))
+        est_hrs = n * 7 / 3600
+        if args.download_pdfs:
+            est_hrs *= 4  # PDF downloads add significant time
+        print("\nEstimate %d-%d: %d windows, ~%.1f hrs%s" % (
+            args.start, args.end, n, est_hrs,
+            " (with PDF download)" if args.download_pdfs else ""
+        ))
     print()
 
     records, elapsed = run_scraper(
         start_year=args.start,
         end_year=args.end,
         mode=args.mode,
-        headed=not args.headless,  # headed=True by default
+        headed=not args.headless,
+        download_pdfs=args.download_pdfs,
     )
 
     if records:

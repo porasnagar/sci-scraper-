@@ -2,9 +2,6 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-.eggs/
-dist/
-build/
 
 # Environments
 .env
@@ -13,14 +10,15 @@ env/
 venv/
 .conda/
 
-# Scraped data (large – don't commit)
+# Scraped data (large)
 sci_judgements/
 
-# Debug / temp
-*.png
+# Debug / temp / old versions
 diagnose_headless.py
 sci_scraper_v1.py
 sci_scraper_v2.py
 sci_scraper_v3.py
 test_ocr.py
 headless_source.html
+rows_preview.json
+generate_results_html.py
